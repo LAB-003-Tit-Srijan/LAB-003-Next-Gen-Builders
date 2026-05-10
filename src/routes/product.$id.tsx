@@ -33,6 +33,7 @@ import { AreaChart, Area, ResponsiveContainer, Tooltip, XAxis, YAxis } from "rec
 import { ListingSafetyBanner } from "@/components/listing-safety-banner";
 import { analyzeListingRisk } from "@/lib/product-safety";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 
 export const Route = createFileRoute("/product/$id")({
   component: ProductDetails,
@@ -49,6 +50,7 @@ export const Route = createFileRoute("/product/$id")({
 });
 
 function ProductDetails() {
+  const { t } = useTranslation();
   const { id } = Route.useParams();
   const { products } = useCatalog();
   const product = products.find((p) => p.id === id);
@@ -343,7 +345,7 @@ function ProductDetails() {
                   size="lg"
                   className="flex-1 rounded-full bg-brand-gradient text-primary-foreground shadow-elegant hover:opacity-90"
                 >
-                  Buy now · ₹{product.price.toLocaleString("en-IN")}
+                  {t("buy")} · ₹{product.price.toLocaleString("en-IN")}
                 </Button>
                 {product.forRent && (
                   <Button size="lg" variant="outline" className="rounded-full">
