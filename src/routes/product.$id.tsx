@@ -33,6 +33,8 @@ import { AreaChart, Area, ResponsiveContainer, Tooltip, XAxis, YAxis } from "rec
 import { ListingSafetyBanner } from "@/components/listing-safety-banner";
 import { analyzeListingRisk } from "@/lib/product-safety";
 import { toast } from "sonner";
+import { useTransferCoins } from "@/lib/economy";
+import { Coins } from "lucide-react";
 
 export const Route = createFileRoute("/product/$id")({
   component: ProductDetails,
@@ -74,6 +76,32 @@ function ProductDetails() {
   const similar = products
     .filter((p) => p.category === product.category && p.id !== product.id)
     .slice(0, 4);
+
+  const { mutate: transferCoins, isPending: transferring } = useTransferCoins();
+
+  const handleBuyWithCoins = () => {
+    if (!product.sellerId) {
+      toast.error("Cannot buy: Seller not found.");
+      return;
+    }
+    transferCoins(
+      {
+        receiverId: product.sellerId,
+        amount: product.price,
+        type: "buy",
+        referenceId: product.id,
+        description: `Bought ${product.title}`,
+      },
+      {
+        onSuccess: () => {
+          toast.success("Purchase successful! Coins transferred.");
+        },
+        onError: (err) => {
+          toast.error(err.message);
+        },
+      }
+    );
+  };
 
   const aiPrice = Math.round(product.price * 0.96);
   const trend = [
@@ -342,8 +370,11 @@ function ProductDetails() {
                 <Button
                   size="lg"
                   className="flex-1 rounded-full bg-brand-gradient text-primary-foreground shadow-elegant hover:opacity-90"
+                  onClick={handleBuyWithCoins}
+                  disabled={transferring}
                 >
-                  Buy now · ₹{product.price.toLocaleString("en-IN")}
+                  <Coins className="mr-2 h-4 w-4" />
+                  {transferring ? "Processing..." : `Buy with Coins · ${product.price.toLocaleString("en-IN")}`}
                 </Button>
                 {product.forRent && (
                   <Button size="lg" variant="outline" className="rounded-full">
