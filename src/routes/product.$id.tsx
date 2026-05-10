@@ -36,6 +36,9 @@ import { toast } from "sonner";
 import { useTransferCoins } from "@/lib/economy";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useQuery } from "@tanstack/react-query";
+import { trustTierColor, type TrustTier } from "@/lib/trust-score";
+import { ShieldCheck } from "lucide-react";
 
 export const Route = createFileRoute("/product/$id")({
   component: ProductDetails,
@@ -79,6 +82,17 @@ function ProductDetails() {
     .slice(0, 4);
 
   const { mutate: transferCoins, isPending: transferring } = useTransferCoins();
+
+  const { data: sellerTrust } = useQuery({
+    queryKey: ["trust-score", product.sellerId],
+    enabled: Boolean(product.sellerId),
+    queryFn: async () => {
+      const res = await fetch(`/api/trust/${product.sellerId}`);
+      if (!res.ok) return null;
+      return (await res.json()) as { ok: boolean; score: number; tier: string; label: string };
+    },
+    staleTime: 120_000,
+  });
 
   const handleBuyWithCoins = () => {
     if (!product.sellerId) {
@@ -476,6 +490,15 @@ function ProductDetails() {
                       {product.seller.rating}
                     </div>
                   </div>
+                  {/* Trust Badge */}
+                  {sellerTrust && (
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${trustTierColor(sellerTrust.tier as TrustTier).bg} ${trustTierColor(sellerTrust.tier as TrustTier).text} ${trustTierColor(sellerTrust.tier as TrustTier).ring}`}
+                    >
+                      <ShieldCheck className="h-3 w-3" />
+                      {sellerTrust.label} · {sellerTrust.score}
+                    </span>
+                  )}
                   {product.sellerId ? (
                     <Link
                       to="/chat"

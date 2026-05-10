@@ -419,7 +419,9 @@ async function handleApiRequest(request: Request, env: unknown): Promise<Respons
     "/api/bots/tick",
   ];
 
-  if (!allowedPaths.includes(url.pathname)) {
+  const isTrustEndpoint = url.pathname.startsWith("/api/trust/");
+
+  if (!allowedPaths.includes(url.pathname) && !isTrustEndpoint) {
     return null;
   }
 
@@ -430,8 +432,73 @@ async function handleApiRequest(request: Request, env: unknown): Promise<Respons
   const aiChatAllowsAnonymous = url.pathname === "/api/ai/chat" && allowAnonymousAi;
   const isBotTick = url.pathname === "/api/bots/tick";
 
-  if (!token && !aiChatAllowsAnonymous && !isBotTick) {
+  if (!token && !aiChatAllowsAnonymous && !isBotTick && !isTrustEndpoint) {
     return new Response("Unauthorized", { status: 401 });
+  }
+
+  // --- Trust Score Endpoint ---
+  if (isTrustEndpoint && request.method === "GET") {
+    const targetUid = url.pathname.replace("/api/trust/", "").trim();
+    if (!targetUid) {
+      return new Response(JSON.stringify({ error: "Missing user ID" }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+    try {
+      const profile = await readUserProfileFromMongo(targetUid, env);
+      // Count transactions from MongoDB
+      let txCount = 0;
+      let listingCount = 0;
+      const mongoUri = getEnvValue(env, "MONGO_URI");
+      const database = getEnvValue(env, "MONGODB_DATABASE");
+      if (mongoUri && database) {
+        const client = await getMongoClient(mongoUri);
+        const db = client.db(database);
+        txCount = await db.collection("transactions").countDocuments({
+          $or: [{ senderId: targetUid }, { receiverId: targetUid }],
+        });
+        listingCount = await db.collection("users").findOne({ firebaseUid: targetUid }).then((u: any) => u?.listingCount ?? 0);
+      }
+      const trustInput = {
+        emailVerified: Boolean(profile?.emailVerified),
+        hasBio: Boolean(profile?.bio),
+        hasCollege: Boolean(profile?.collegeName),
+        hasMajor: Boolean(profile?.major),
+        createdAt: profile?.createdAt ?? null,
+        transactionCount: txCount,
+        listingCount,
+        hasFraudFlags: Boolean(profile?.fraudFlagged),
+        avgRating: typeof profile?.avgRating === "number" ? profile.avgRating : 0,
+      };
+      // Inline computation to avoid importing client-side module in server
+      const breakdown = {
+        emailVerified: trustInput.emailVerified ? 15 : 0,
+        profileComplete: (trustInput.hasBio ? 5 : 0) + (trustInput.hasCollege ? 5 : 0) + (trustInput.hasMajor ? 5 : 0),
+        accountAge: 0,
+        transactions: Math.min(trustInput.transactionCount * 5, 20),
+        listings: Math.min(trustInput.listingCount * 2, 10),
+        noFraudFlags: trustInput.hasFraudFlags ? 0 : 15,
+        sellerRating: Math.round(Math.min(trustInput.avgRating / 5, 1) * 10),
+      };
+      if (trustInput.createdAt) {
+        const created = typeof trustInput.createdAt === "number" ? trustInput.createdAt : new Date(trustInput.createdAt).getTime();
+        if (Number.isFinite(created)) {
+          const ageDays = (Date.now() - created) / (1000 * 60 * 60 * 24);
+          breakdown.accountAge = Math.round(Math.min(ageDays / 180, 1) * 15);
+        }
+      }
+      const score = Object.values(breakdown).reduce((a: number, b: number) => a + b, 0);
+      const tier = score >= 80 ? "excellent" : score >= 60 ? "good" : score >= 30 ? "fair" : "new";
+      const label = score >= 80 ? "Excellent" : score >= 60 ? "Good" : score >= 30 ? "Fair" : "New";
+      return new Response(JSON.stringify({ ok: true, score, tier, label, breakdown }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    } catch (error) {
+      console.error(error);
+      return new Response(JSON.stringify({ ok: false, error: "Failed to compute trust score" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      });
+    }
   }
 
   if (url.pathname === "/api/users/me") {
